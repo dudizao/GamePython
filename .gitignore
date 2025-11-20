@@ -1,0 +1,35 @@
+# Ambiente virtual
+venv/
+.env/
+env/
+
+# Cache do Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Arquivos de build (PyInstaller, cx_Freeze, etc)
+build/
+dist/
+*.spec
+
+# Logs e configurações locais
+*.log
+.DS_Store
+
+# Dados temporários
+*.tmp
+*.bak
+*.swp
+
+# Arquivos específicos do macOS
+Icon?
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Arquivos do VSCode ou IDEs
+.vscode/
+.idea/
+*.code-workspace
