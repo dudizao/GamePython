@@ -11,6 +11,9 @@ var hp: int
 var attack: int
 var defense: int
 var xp: int
+var special := ""
+## Esqueleto que já ressurgiu uma vez (não ressurge de novo e vale metade do XP).
+var revived := false
 
 
 func atk_total() -> int:
@@ -36,4 +39,5 @@ static func create(p_id: int, p_kind: String, p_level: int, p_pos: Vector2i) -> 
 	m.attack = int(round(base["attack"] * k))
 	m.defense = int(round(base["defense"] * k))
 	m.xp = int(round(base["xp"] * k))
+	m.special = base.get("special", "")
 	return m

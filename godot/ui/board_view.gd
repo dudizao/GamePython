@@ -348,6 +348,8 @@ func _draw() -> void:
 			if b.ring_of(c) <= state.warning_ring:
 				draw_rect(cell_rect(c), Color(1, 0.15, 0.1, pulse))
 
+	_draw_storm(b, cs)
+
 	# alcance
 	for c in reach:
 		var r: Rect2 = cell_rect(c)
@@ -372,7 +374,7 @@ func _draw() -> void:
 	# armadilhas armadas
 	for c in state.traps:
 		if _can_see_trap(state.traps[c]):
-			_draw_trap(c, state.traps[c]["owner"], font)
+			_draw_trap(c, state.traps[c]["owner"])
 
 	# monstros
 	for id in state.monsters:
@@ -404,6 +406,32 @@ func _draw() -> void:
 		var p := r.position + Vector2(cs / 2.0, -a * 26.0 + 6)
 		draw_string(font, p + Vector2(1, 1), f["text"], HORIZONTAL_ALIGNMENT_CENTER, cs * 2, 16, Color(0, 0, 0, col.a), 3)
 		draw_string(font, p, f["text"], HORIZONTAL_ALIGNMENT_CENTER, cs * 2, 16, col)
+
+
+## Tempestade: a que caiu nesta rodada (chuva, custo +1) e a avisada para a próxima (roxa, com raio).
+func _draw_storm(b: Board, cs: float) -> void:
+	for c in state.storm_cells:
+		var r := cell_rect(c)
+		draw_rect(r, Color(0.45, 0.5, 0.75, 0.28))
+		for k in 2:
+			var ph := fposmod(_t * 1.6 + float(c.x * 7 + c.y * 3 + k * 5) * 0.37, 1.0)
+			var p := r.position + Vector2(r.size.x * (0.25 + 0.5 * k), r.size.y * ph)
+			draw_line(p, p + Vector2(-cs * 0.12, cs * 0.2), Color(0.8, 0.9, 1.0, 0.7), 1.5)
+	if state.storm_next_cells.is_empty():
+		return
+	var pulse := 0.5 + 0.5 * sin(_t * 4.0)
+	for c in state.storm_next_cells:
+		var r := cell_rect(c)
+		draw_rect(r, Color(0.65, 0.3, 1.0, 0.16 + 0.12 * pulse))
+		draw_rect(r.grow(-1.0), Color(0.8, 0.55, 1.0, 0.55 + 0.35 * pulse), false, 1.5)
+	var m := cell_rect(state.storm_next)
+	var o := m.position
+	var s := cs
+	var bolt := PackedVector2Array([
+		o + Vector2(0.58, 0.12) * s, o + Vector2(0.30, 0.54) * s, o + Vector2(0.48, 0.54) * s,
+		o + Vector2(0.38, 0.90) * s, o + Vector2(0.72, 0.44) * s, o + Vector2(0.52, 0.44) * s,
+	])
+	draw_colored_polygon(bolt, Color(1.0, 0.92, 0.35, 0.75 + 0.25 * pulse))
 
 
 func _draw_terrain(t: int, r: Rect2, cs: float) -> void:
@@ -529,7 +557,7 @@ func _can_see_trap(t: Dictionary) -> bool:
 	return v != null and v.hero_class == Defs.HeroClass.LADINO and not v.undead
 
 
-func _draw_trap(c: Vector2i, owner: int, font: Font) -> void:
+func _draw_trap(c: Vector2i, owner: int) -> void:
 	var r := cell_rect(c)
 	var ctr := r.get_center()
 	var k := r.size.x
@@ -658,6 +686,13 @@ func _draw_hero(h: Hero, stack: int, font: Font) -> void:
 		draw_circle(c, cs * 0.38, Color(1, 0.3, 0.3, clampf(_flash[h.id] / 0.4, 0.0, 1.0) * 0.6))
 	if h.undead:
 		draw_string(font, c + Vector2(-6, -cs * 0.28), "☠", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("c8ffc8"))
+	var dot := 0
+	for st in [[h.frozen, Color("8ecdf0")], [h.burn_turns > 0, Color("ff7a3d")], [h.snared, Color("b070e0")]]:
+		if st[0]:
+			var dp := c + Vector2(cs * 0.36, -cs * 0.34 + dot * cs * 0.17)
+			draw_circle(dp, cs * 0.075, Color(0, 0, 0, 0.7))
+			draw_circle(dp, cs * 0.055, st[1])
+			dot += 1
 	_draw_bar(Rect2(r.position + off + Vector2(3, r.size.y - 5), Vector2(cs - 6, 4)), float(_hp_disp.get(h.id, float(h.hp))) / h.max_hp, Color("5fd38d") if not h.undead else Color("7be07b"))
 
 

@@ -269,3 +269,22 @@ faixa aceitável. Reavaliar com partidas reais.
 - **Mãos por classe:** Guerreiro (braçadeira de couro com rebites, bate os dados com força e levanta poeira), Mago (túnica larga com
   estrelas e barra dourada, lança com faíscas roxas e halo nos dados), Ladino (luva sem dedos, sacudida rápida e giro de pulso em truque),
   Clérigo (punho e anéis dourados, gesto suave e faíscas douradas de bênção durante a sacudida).
+
+## 21. Tabuleiro vivo (terreno que muda, monstros de bioma, eventos)
+
+Tudo acontece no início de cada rodada (`GameState._world_tick`), com o mesmo RNG da partida, e só gera eventos para a interface.
+
+**Monstros de bioma** (`Defs.MONSTER_KINDS`): o tipo é sorteado depois da casa. Os três comuns têm peso base; os de bioma ganham `BIOME_SPAWN_WEIGHT` quando a casa combina.
+- Yeti (gelo): se ferir o herói e ele sobreviver, a próxima rolagem de movimento perde 3 pontos.
+- Salamandra (lava): queimadura de 5 de dano no início dos 2 turnos seguintes; nunca mata (deixa 1 de vida).
+- Polvo (casa ao lado da água): o herói anda no máximo 2 pontos no próximo turno.
+- Esqueleto (masmorra): ressurge uma vez, 2 rodadas depois, com metade da vida e metade do XP.
+
+**Terreno vivo**
+- Gelo: quem termina o movimento em gelo desliza para a casa seguinte na direção do movimento, até 3 casas, parando em obstáculo, herói ou monstro.
+- Lava: a cada rodada, 1 casa vizinha (sem herói, monstro nem item) vira lava, até 10% das casas.
+- Tempestade: a partir da rodada 3 uma região 5x3 é avisada; na rodada seguinte cai (10 de dano a quem ficou, +1 de custo de movimento durante a rodada) e uma nova é avisada, perto de um herói sorteado.
+
+**Eventos de rodada**: a cada 3 rodadas (3, 6, 9…), sorteado e avisado na rodada anterior, nunca o mesmo duas vezes seguidas: chuva de itens (5), caravana (2 monstros extras), trégua (sem batalha entre heróis nem magia na rodada), erupção (3 casas de lava) e nevasca (7 casas de gelo).
+
+Simulação (3.240 partidas só com bots): duração média 28/46/60 turnos totais com 2/3/4 jogadores, igual à de antes; vitórias por classe entre 29% e 39% (misturando 2 a 4 jogadores).

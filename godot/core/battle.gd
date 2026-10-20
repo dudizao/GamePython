@@ -20,6 +20,8 @@ var origin := Vector2i.ZERO
 var round_no := 1
 var pids: Array[int] = []
 var choices := {}  # player_id -> { action, potion }
+## O monstro chegou a ferir um herói nesta luta (ativa o efeito de bioma ao final).
+var _monster_hurt := -1
 
 
 static func start(p_gs: GameState, p_attacker: Hero, p_defender: Hero, p_monster: Monster, p_origin: Vector2i, events: Array) -> Battle:
@@ -217,6 +219,8 @@ func _resolve(events: Array) -> void:
 		else:
 			dst.hp = maxi(0, dst.hp - h["dmg"])
 			applied = h["dmg"]
+		if applied > 0 and src is Monster and dst is Hero:
+			_monster_hurt = dst.id
 		if applied > 0 and src is Hero and dst is Hero:
 			gsr._add_xp(src, Defs.XP_PER_PVP_ROUND_WIN, events)
 		dealt.append({ "src": h["src"], "dst": h["dst"], "damage": applied, "kind": h["kind"] })
@@ -245,6 +249,22 @@ func _resolve(events: Array) -> void:
 		_end(events, "timeout", -1)
 
 
+## Efeito de bioma: só se o monstro feriu o herói e este continua vivo.
+func _apply_monster_special(events: Array, attacker_died: bool) -> void:
+	if kind != "monster" or _monster_hurt < 0 or attacker_died or not attacker.alive or attacker.undead:
+		return
+	match monster.special:
+		"gelo":
+			attacker.frozen = true
+		"queimadura":
+			attacker.burn_turns = Defs.BURN_TURNS
+		"prende":
+			attacker.snared = true
+		_:
+			return
+	events.append({ "type": "status_applied", "player": attacker.id, "status": monster.special })
+
+
 func _power_bonus(i: int, off: String) -> int:
 	var f = _fighter(i)
 	if not (f is Hero):
@@ -268,10 +288,14 @@ func _end(events: Array, outcome: String, fleer: int) -> void:
 	var defender_died := defender != null and not defender.alive
 	g._check_end(events)
 
+	_apply_monster_special(events, attacker_died)
 	var monster_killed := kind == "monster" and monster.hp <= 0
 	if monster_killed:
 		events.append({ "type": "monster_killed", "player": attacker.id, "monster": monster.id, "kind": monster.kind, "pos": monster.pos })
 		g.monsters.erase(monster.id)
+		if monster.special == "ressurge" and not monster.revived:
+			g.reviving.append({ "kind": monster.kind, "level": monster.level, "pos": monster.pos, "due": g.round_number + Defs.SKELETON_REVIVE_ROUNDS })
+			events.append({ "type": "monster_will_revive", "pos": monster.pos, "round": g.round_number + Defs.SKELETON_REVIVE_ROUNDS })
 		g._drop_loot(monster.pos, events)
 		if not attacker_died:
 			g._add_xp(attacker, monster.xp, events)

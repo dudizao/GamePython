@@ -20,8 +20,11 @@ const BY_CLASS := {
 	Defs.HeroClass.CLERIGO: "clerigo",
 }
 ## Monstros do jogo -> modelo (o ogro usa o golem de pedra).
-const MONSTER_BY_KIND := { "slime": "slime", "lobo": "lobo", "ogro": "golem" }
-## Monstros prontos para futuras regras (yeti no gelo, salamandra na lava...).
+const MONSTER_BY_KIND := {
+	"slime": "slime", "lobo": "lobo", "ogro": "golem",
+	"yeti": "yeti", "salamandra": "salamandra", "esqueleto": "esqueleto", "polvo": "polvo",
+}
+## Monstros de bioma (ver Defs.MONSTER_KINDS).
 const MONSTER_EXTRA := ["yeti", "esqueleto", "polvo", "salamandra"]
 const MONSTER_DIR := "res://assets/models3d/monstros/"
 

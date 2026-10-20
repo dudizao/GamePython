@@ -30,6 +30,10 @@ var buff_attack := 0
 var buff_rounds := 0
 ## Esquiva da batalha: vale só na rodada em que foi usada.
 var dodge_round := false
+## Efeitos de monstros de bioma.
+var frozen := false      # próxima rolagem de movimento: -FREEZE_MOVE_PENALTY
+var snared := false      # próximo turno: movimento limitado a SNARE_MOVE_CAP
+var burn_turns := 0      # turnos restantes de queimadura
 
 
 static func create(p_id: int, p_name: String, p_class: int, p_pos: Vector2i) -> Hero:

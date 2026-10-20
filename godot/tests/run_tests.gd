@@ -35,6 +35,7 @@ func _init() -> void:
 	test_undead()
 	test_closing_map()
 	test_sudden_death_tiebreak()
+	test_living_board()
 	test_bot_games()
 	print("\n%d verificações, %d falhas" % [_checks, _fails])
 	quit(1 if _fails > 0 else 0)
@@ -689,7 +690,7 @@ func test_abilities() -> void:
 func test_cooldown() -> void:
 	print("cooldown em turnos")
 	var s := duel(1, G.CLERIGO, G.MAGO)
-	var h := make_current(s, 0, Defs.Phase.ACTION)
+	make_current(s, 0, Defs.Phase.ACTION)
 	check(s.apply(0, { "type": "ability" }).ok, "usa")
 	s.phase = Defs.Phase.ACTION
 	check(s.apply(0, { "type": "ability" }).error == "on_cooldown", "bloqueada em recarga")
@@ -719,7 +720,6 @@ func test_cards() -> void:
 	for card in Cards.DECK:
 		var before_hp := h.hp
 		var before_xp := h.xp
-		var before_pos := h.pos
 		match card["effect"]:
 			"heal":
 				h.heal(card["value"])
@@ -919,12 +919,237 @@ func test_monsters() -> void:
 	check(not h4.alive and g.finished and g.winner == 1, "morrer para monstro elimina o herói")
 
 
+func advance_round(s: GameState) -> Array:
+	## Passa turnos até começar uma nova rodada; devolve os eventos gerados.
+	var out: Array = []
+	var r := s.round_number
+	var guard := 0
+	while s.round_number == r and not s.finished and guard < 50:
+		guard += 1
+		s.phase = Defs.Phase.ACTION
+		out.append_array(s.apply(s.current_player(), { "type": "end_turn" }).events)
+	return out
+
+
+func has_event(events: Array, type: String) -> bool:
+	return events.any(func(e): return e["type"] == type)
+
+
+func test_living_board() -> void:
+	print("tabuleiro vivo: biomas, terreno e eventos")
+	# monstros de bioma só no terreno certo
+	var s := duel(21)
+	flatten(s)
+	var ice := Vector2i(8, 8)
+	s.board.set_terrain(ice, Defs.Terrain.GELO)
+	var plain := Vector2i(15, 8)
+	var yeti_on_ice := 0
+	var yeti_on_plain := 0
+	for i in 300:
+		if s._roll_monster_kind(ice) == "yeti": yeti_on_ice += 1
+		if s._roll_monster_kind(plain) == "yeti": yeti_on_plain += 1
+	check(yeti_on_ice > 40 and yeti_on_plain == 0, "yeti surge no gelo e não na planície (%d/%d)" % [yeti_on_ice, yeti_on_plain])
+	var water := Vector2i(20, 12)
+	s.board.set_terrain(water + Vector2i(1, 0), Defs.Terrain.AGUA)
+	var octo := 0
+	for i in 300:
+		if s._roll_monster_kind(water) == "polvo": octo += 1
+	check(octo > 40, "polvo surge ao lado da água (%d)" % octo)
+	for kind in Defs.MONSTER_KINDS:
+		var mk := Monster.create(1, kind, 1, Vector2i(1, 1))
+		check(mk.hp > 0 and mk.special == Defs.MONSTER_KINDS[kind].get("special", ""), "monstro %s criado" % kind)
+
+	# gelo: desliza para a frente e para no obstáculo
+	var g := duel(22)
+	flatten(g)
+	for x in range(10, 14):
+		g.board.set_terrain(Vector2i(x, 5), Defs.Terrain.GELO)
+	g.board.set_terrain(Vector2i(14, 5), Defs.Terrain.AGUA)
+	var h := make_current(g, 0, Defs.Phase.MOVE)
+	place(g, 0, Vector2i(9, 5))
+	place(g, 1, Vector2i(30, 20))
+	h.move_points = 5
+	h.hp = 100
+	var res := g.apply(0, { "type": "move", "to": Vector2i(10, 5) })
+	check(res.ok and has_event(res.events, "slid") and h.pos == Vector2i(13, 5), "desliza no gelo até a água (%s)" % str(h.pos))
+
+	# congelado / preso reduzem o movimento da próxima rolagem
+	var f := duel(23)
+	flatten(f)
+	var hf := make_current(f, 0, Defs.Phase.ROLL)
+	place(f, 0, Vector2i(10, 10))
+	hf.frozen = true
+	var r1 := f.apply(0, { "type": "roll" })
+	check(r1.ok and r1.events[0]["status"] == "gelo" and not hf.frozen, "congelado gasta o efeito na rolagem")
+	var hp := make_current(f, 0, Defs.Phase.ROLL)
+	hp.snared = true
+	var r2 := f.apply(0, { "type": "roll" })
+	check(r2.ok and hp.move_points <= Defs.SNARE_MOVE_CAP and not hp.snared, "preso limita o movimento (%d)" % hp.move_points)
+
+	# efeito do monstro aplicado ao final da batalha
+	for kind in ["yeti", "salamandra", "polvo"]:
+		var b := duel(24)
+		flatten(b)
+		var hb := make_current(b, 0, Defs.Phase.MOVE)
+		var mon := Monster.create(1, kind, 1, Vector2i(1, 1))
+		var bt := Battle.new()
+		bt.gs = b
+		bt.kind = "monster"
+		bt.attacker = hb
+		bt.monster = mon
+		bt._monster_hurt = 0
+		var ev: Array = []
+		bt._apply_monster_special(ev, false)
+		check(has_event(ev, "status_applied") and (hb.frozen or hb.burn_turns > 0 or hb.snared), "%s aplica o efeito" % kind)
+		var bt2 := Battle.new()
+		bt2.gs = b
+		bt2.kind = "monster"
+		bt2.attacker = make_current(duel(24), 0)
+		bt2.monster = mon
+		var ev2: Array = []
+		bt2._apply_monster_special(ev2, false)
+		check(ev2.is_empty(), "%s sem ferir não aplica efeito" % kind)
+
+	# queimadura: dano no início do turno, nunca mata
+	var q := duel(25)
+	flatten(q)
+	var other: int = 1 - q.current_player()
+	q.heroes[other].burn_turns = 2
+	q.heroes[other].hp = 3
+	advance_round(q)
+	check(q.heroes[other].hp == 1 and q.heroes[other].alive and q.heroes[other].burn_turns == 1, "queimadura deixa 1 de vida (hp %d)" % q.heroes[other].hp)
+
+	# esqueleto ressurge uma vez
+	var k := duel(26)
+	flatten(k)
+	var skel := Monster.create(77, "esqueleto", 1, Vector2i(12, 8))
+	k.monsters[77] = skel
+	var hk := make_current(k, 0, Defs.Phase.MOVE)
+	place(k, 0, Vector2i(11, 8))
+	place(k, 1, Vector2i(30, 20))
+	hk.hp = 9999
+	hk.max_hp = 9999
+	hk.attack = 500
+	hk.move_points = 3
+	k.apply(0, { "type": "move", "to": Vector2i(12, 8) })
+	finish_battle(k)
+	check(not k.monsters.has(77) and k.reviving.size() == 1, "esqueleto derrotado agenda a ressurreição")
+	var rev: Array = []
+	var guard := 0
+	while not has_event(rev, "monster_revived") and guard < 6 and not k.finished:
+		guard += 1
+		rev.append_array(advance_round(k))
+	var revived: Monster = null
+	for id in k.monsters:
+		if k.monsters[id].revived:
+			revived = k.monsters[id]
+	check(revived != null and revived.revived and revived.hp <= revived.max_hp / 2 + 1, "esqueleto volta com metade da vida")
+
+	# tempestade: avisa, cai na rodada seguinte, fere e encarece o movimento
+	var st := duel(27)
+	flatten(st)
+	place(st, 0, Vector2i(10, 10))
+	place(st, 1, Vector2i(30, 20))
+	var ev_all: Array = []
+	var guard2 := 0
+	while st.storm_next == Vector2i(-1, -1) and guard2 < 6:
+		guard2 += 1
+		ev_all.append_array(advance_round(st))
+	check(has_event(ev_all, "storm_warning") and st.round_number == Defs.STORM_START_ROUND, "tempestade é avisada na rodada %d" % Defs.STORM_START_ROUND)
+	var cells := st.storm_next_cells.duplicate()
+	var in_area: Vector2i = cells[0]
+	check(st.cell_cost(in_area) == st.board.move_cost(in_area), "antes de cair não custa extra")
+	for hid in st.heroes:
+		st.heroes[hid].pos = in_area if hid == 0 else Vector2i(30, 20)
+		st.heroes[hid].hp = 100
+	var ev_storm := advance_round(st)
+	check(has_event(ev_storm, "storm_struck") and st.heroes[0].hp == 100 - Defs.STORM_DAMAGE, "tempestade fere quem ficou (hp %d)" % st.heroes[0].hp)
+	check(st.cell_cost(in_area) == st.board.move_cost(in_area) + Defs.STORM_EXTRA_COST, "região da tempestade custa +1")
+
+	# eventos de rodada: aviso antes, efeito na rodada marcada, sem repetir seguido
+	var ev3 := duel(28)
+	flatten(ev3)
+	place(ev3, 0, Vector2i(10, 10))
+	place(ev3, 1, Vector2i(30, 20))
+	var announced: Array = []
+	var happened: Array = []
+	var rounds := 0
+	while rounds < 14 and not ev3.finished:
+		rounds += 1
+		for hid in ev3.heroes:
+			ev3.heroes[hid].hp = ev3.heroes[hid].max_hp
+		var evs := advance_round(ev3)
+		for e in evs:
+			if e["type"] == "round_event_announced":
+				announced.append(e["kind"])
+				check(e["round"] % Defs.ROUND_EVENT_EVERY == 0, "evento anunciado para rodada múltipla de %d" % Defs.ROUND_EVENT_EVERY)
+			elif e["type"] == "round_event":
+				happened.append(e["kind"])
+				check(ev3.round_number % Defs.ROUND_EVENT_EVERY == 0, "evento acontece na rodada certa")
+	check(happened.size() >= 3 and happened.size() <= announced.size(), "eventos acontecem (%d de %d anunciados)" % [happened.size(), announced.size()])
+	for i in range(1, happened.size()):
+		check(happened[i] != happened[i - 1], "evento não repete em seguida")
+	for i in happened.size():
+		check(announced[i] == happened[i], "evento que acontece é o anunciado")
+
+	# trégua: sem luta entre heróis nem magia
+	var tr := duel(29, G.MAGO, G.GUERREIRO)
+	flatten(tr)
+	var hm := make_current(tr, 0, Defs.Phase.ACTION)
+	place(tr, 0, Vector2i(10, 10))
+	place(tr, 1, Vector2i(12, 10))
+	tr.truce_round = tr.round_number
+	var tres := tr.apply(0, { "type": "ability", "target": 1 })
+	check(not tres.ok and tres.error == "truce", "magia bloqueada na trégua")
+	hm.move_points = 3
+	tr.phase = Defs.Phase.MOVE
+	var mv := tr.apply(0, { "type": "move", "to": Vector2i(12, 10) })
+	check(mv.ok and tr.phase != Defs.Phase.BATTLE and tr.battle == null, "sem batalha entre heróis na trégua")
+
+	# chuva de itens, caravana, erupção e nevasca
+	for kind in ["chuva_itens", "caravana", "erupcao", "nevasca"]:
+		var e := duel(30)
+		flatten(e)
+		place(e, 0, Vector2i(10, 10))
+		place(e, 1, Vector2i(30, 20))
+		var items_before := 0
+		for c in e.items:
+			items_before += e.items[c].size()
+		var mons_before := e.monsters.size()
+		var evs: Array = []
+		e._apply_round_event(kind, evs)
+		check(has_event(evs, "round_event"), "evento %s acontece" % kind)
+		match kind:
+			"chuva_itens":
+				var after := 0
+				for c in e.items:
+					after += e.items[c].size()
+				check(after == items_before + Defs.EVENT_RAIN_ITEMS, "chuva larga itens")
+			"caravana":
+				check(e.monsters.size() == mons_before + Defs.EVENT_CARAVAN_MONSTERS, "caravana traz monstros")
+			"erupcao":
+				check(e._count_terrain(Defs.Terrain.LAVA) >= 1, "erupção cria lava")
+			"nevasca":
+				check(e._count_terrain(Defs.Terrain.GELO) == Defs.EVENT_SNOW_CELLS, "nevasca cria gelo")
+
+	# lava se espalha, mas respeita o limite
+	var lv := duel(31)
+	flatten(lv)
+	lv.board.set_terrain(Vector2i(20, 12), Defs.Terrain.LAVA)
+	var before := lv._count_terrain(Defs.Terrain.LAVA)
+	lv._spread_lava([])
+	check(lv._count_terrain(Defs.Terrain.LAVA) == before + Defs.LAVA_SPREAD_PER_ROUND, "lava se espalha")
+	for i in 400:
+		lv._spread_lava([])
+	var cap: int = lv.board.main_cells.size() * Defs.LAVA_MAX_PCT / 100
+	check(lv._count_terrain(Defs.Terrain.LAVA) <= cap + Defs.LAVA_SPREAD_PER_ROUND, "lava respeita o limite (%d de %d)" % [lv._count_terrain(Defs.Terrain.LAVA), cap])
+
+
 func test_bot_games() -> void:
 	print("partidas completas só com bots")
 	var finished_by_win := 0
 	var kills := 0
 	var level_ups := 0
-	var by_trophies := 0
 	var total_turns := 0
 	var games := 0
 	var classes := [G.GUERREIRO, G.MAGO, G.LADINO, G.CLERIGO]
@@ -1332,7 +1557,6 @@ func test_closing_map() -> void:
 	place(s, 0, Vector2i(0, 7))
 	place(s, 1, Vector2i(20, 12))
 	s.heroes[0].hp = 100
-	var order := s.turn_order.duplicate()
 	var seen_warning := false
 	var closed_event := false
 	var hp_before: int = s.heroes[0].hp

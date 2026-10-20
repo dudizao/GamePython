@@ -50,3 +50,7 @@ passe de malha inflada). Cores da pele e da manga: `SKIN`/`SKIN_SHADE` em `ui/ha
 - Monstros: `assets/models3d/monstros/` (slime, lobo, golem em uso — o ogro usa o golem; yeti, esqueleto, polvo e salamandra prontos para novas regras). `Models3D.key_for_monster(tipo)`, `Art.monster_tex(tipo, anim, t)`.
 - Uso no jogo: `ui/hero_sprites.gd` renderiza cada modelo uma vez na abertura em 8 quadros (idle/walk) e `Art.hero_tex(classe, anim, t)` entrega o quadro; `ui/hero_portrait.gd` é o retrato animado (cartões, HUD, batalha). O tabuleiro e o fundo do menu desenham os quadros direto. Sem renderizador (headless) ou antes de ficarem prontos, cai nos PNGs antigos.
 -  as 6 classes extras não têm regras.
+
+## Tabuleiro vivo
+
+Terreno que muda (gelo que escorrega, lava que se espalha, tempestade avisada), monstros de bioma (yeti, salamandra, polvo, esqueleto) e evento de rodada a cada 3 rodadas. Regras em `docs/especificacao-regras.md`, seção 21; código em `GameState._world_tick` e `Defs`. A interface só reage aos eventos (`storm_warning`, `storm_struck`, `round_event`, `terrain_changed`, `slid`, `status_applied`, `monster_revived`).

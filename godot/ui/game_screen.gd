@@ -9,7 +9,7 @@ const BATTLE_SECONDS := 15.0
 const ERRORS := {
 	"not_your_turn": "Não é a sua vez.", "wrong_phase": "Ação indisponível agora.",
 	"unreachable": "Casa fora de alcance.", "nothing_here": "Não há itens aqui.",
-	"on_cooldown": "Habilidade em recarga.", "out_of_range": "Alvo fora de alcance.",
+	"truce": "Trégua: sem magia contra heróis nesta rodada.", "on_cooldown": "Habilidade em recarga.", "out_of_range": "Alvo fora de alcance.",
 	"invalid_target": "Alvo inválido.", "no_potion": "Você não tem essa poção.",
 	"undead_cannot_collect": "Mortos-vivos não coletam itens.", "in_battle": "Termine a batalha primeiro.",
 	"no_trap_kit": "Você não tem kit de armadilha.", "trap_here": "Já há uma armadilha aqui.",
@@ -843,6 +843,12 @@ func _on_cell_hovered(c: Vector2i) -> void:
 	var m := state.monster_at(c)
 	if m != null:
 		parts.append("%s nv%d  HP %d/%d  ATK %d  DEF %d" % [m.display_name, m.level, m.hp, m.max_hp, m.attack, m.defense])
+		if m.special != "":
+			parts.append(Texts.monster_special(m))
+	if state.storm_next_cells.has(c):
+		parts.append("Tempestade na próxima rodada (%d de dano)" % Defs.STORM_DAMAGE)
+	elif state.storm_cells.has(c):
+		parts.append("Tempestade: +%d de custo" % Defs.STORM_EXTRA_COST)
 	for h in state.alive_heroes():
 		if h.pos == c:
 			parts.append("%s%s nv%d  HP %d/%d  ATK %d  DEF %d" % [h.display_name, " (morto-vivo)" if h.undead else "", h.level, h.hp, h.max_hp, h.atk_total(), h.def_total()])
@@ -1130,6 +1136,42 @@ func _fx_for(e: Dictionary) -> void:
 			bv.shake(3.0, 0.25)
 			_bt_die_monster()
 			_hold(0.8)
+		"storm_warning":
+			bv.fx("ring", e["center"], { "color": Color("c8a0ff"), "radius": 2.0, "dur": 0.9 })
+			_hold(0.7)
+		"storm_struck":
+			_screen_flash(Color(0.85, 0.9, 1.0, 0.4))
+			bv.shake(4.0, 0.4)
+			for c in e["cells"]:
+				bv.fx("flashcell", c, { "color": Color(0.8, 0.85, 1.0), "dur": 0.45 })
+			_hold(1.0)
+		"round_event_announced":
+			_hold(0.5)
+		"round_event":
+			for c in e["cells"]:
+				bv.fx("burst", c, { "color": Color("8be9fd"), "count": 8, "radius": 1.0, "dur": 0.6 })
+				bv.fx("ring", c, { "color": Color("8be9fd"), "radius": 1.0, "dur": 0.6 })
+			_hold(1.1)
+		"terrain_changed":
+			var tcol: Color = Color("ff7a3d") if e["to"] == Defs.Terrain.LAVA else Color("bfe8ff")
+			for c in e["cells"]:
+				bv.fx("flashcell", c, { "color": tcol, "dur": 0.7 })
+				bv.fx("burst", c, { "color": tcol, "count": 6, "radius": 0.8, "dur": 0.5 })
+			if e["cause"] != "lava_spread":
+				_hold(0.6)
+		"slid":
+			bv.fx("burst", e["to"], { "color": Color("bfe8ff"), "count": 8, "radius": 1.0, "dur": 0.5 })
+			bv.add_floater(e["to"], "Escorregou!", Color("bfe8ff"))
+		"status_applied":
+			var scol: Color = { "gelo": Color("8ecdf0"), "queimadura": Color("ff7a3d"), "prende": Color("b070e0") }.get(e["status"], Color.WHITE)
+			var scell := _hero_cell(e["player"])
+			bv.fx("ring", scell, { "color": scol, "radius": 1.2, "dur": 0.6 })
+			_bt_pulse_pid(e["player"], scol)
+			_bt_float_pid(e["player"], { "gelo": "Congelado!", "queimadura": "Queimando!", "prende": "Preso!" }.get(e["status"], ""), scol)
+		"monster_revived":
+			bv.fx("spawn", e["pos"], { "dur": 1.0 })
+			bv.fx("burst", e["pos"], { "color": Color("e8dfc0"), "count": 10, "radius": 1.1, "dur": 0.6 })
+			_hold(0.9)
 		"ring_closed":
 			bv.start_ring_close(e["cells"], e["ring"])
 			bv.shake(6.0, 1.0)
@@ -1426,7 +1468,11 @@ func _sound_for(e: Dictionary) -> void:
 			if human < 0 or e["player"] == human:
 				Sfx.play("trap_set")
 		"trap_triggered": Sfx.play("trap_trigger")
-		"ring_warning": Sfx.play("ring_warning")
+		"ring_warning", "storm_warning", "round_event_announced": Sfx.play("ring_warning", -4.0)
+		"storm_struck": Sfx.play("ring_close", -3.0)
+		"round_event": Sfx.play("card")
+		"slid": Sfx.play("dodge", -3.0)
+		"status_applied", "monster_revived": Sfx.play("undead", -4.0)
 		"ring_closed", "sudden_death": Sfx.play("ring_close")
 		"turn_started":
 			if e["player"] == human:
@@ -1503,6 +1549,16 @@ func _process_events(events: Array) -> void:
 				_toast("%s subiu para o nível %d!" % [state.heroes[e["player"]].display_name, e["level"]])
 			"ring_warning":
 				_toast("⚠ O anel externo fecha na próxima rodada!")
+			"storm_warning":
+				_toast("⛈ Tempestade! A região roxa será atingida.")
+			"storm_struck":
+				_toast("⛈ A tempestade caiu!")
+			"round_event_announced":
+				_toast("◆ Próxima rodada: %s" % Texts.event_name(e["kind"]))
+			"round_event":
+				_toast("◆ %s: %s" % [Texts.event_name(e["kind"]), Texts.EVENT_DESCS.get(e["kind"], "")])
+			"monster_revived":
+				_toast("☠ Um esqueleto ressurgiu!")
 			"ring_closed":
 				_toast("O mapa fechou mais um anel!")
 			"sudden_death":
@@ -1529,6 +1585,12 @@ func _refresh() -> void:
 		warn = "   ⚠ anel fechando"
 	elif state.rings_closed >= state.board.max_rings():
 		warn = "   ☠ MORTE SÚBITA"
+	if state.is_truce():
+		warn += "  ◆ TRÉGUA"
+	elif state.pending_event != "":
+		warn += "  ◆ %s (R%d)" % [Texts.event_name(state.pending_event), state.round_number + 1]
+	if not state.storm_next_cells.is_empty():
+		warn += "  ⛈"
 	status_label.text = "Rodada %d · %s: %s%s" % [state.round_number, cur.display_name, phase_text, warn] if not state.finished else "Rodada %d · Fim de jogo" % state.round_number
 	status_label.add_theme_color_override("font_color", Art.player_color(cur.id) if state.phase != Defs.Phase.BATTLE else Style.ACCENT)
 	if human < 0 or not state.pending_actors().has(human):
@@ -1572,6 +1634,7 @@ func _refresh_cards() -> void:
 			bits.append("Armadura: %s" % Defs.EQUIPMENT[h.armor]["name"])
 		if h.traps > 0:
 			bits.append("Kits %d" % h.traps)
+		bits.append_array(Texts.status_names(h))
 		if h.undead:
 			bits.insert(0, "MORTO-VIVO")
 		elif not h.alive:
@@ -1637,6 +1700,8 @@ func _update_fighter_box(box: Dictionary, f) -> void:
 		box["name"].text = "[center][b]%s[/b][/center]" % f.display_name
 		box["hp"].add_theme_stylebox_override("fill", Style.box(Style.BAD, 4))
 		box["stats"].text = "[center]nv%d\nVida %d/%d\nAtaque %d · Defesa %d[/center]" % [f.level, f.hp, f.max_hp, f.attack, f.defense]
+		if f.special != "":
+			box["stats"].text += "\n[center][color=#c8a0ff]%s[/color][/center]" % Texts.monster_special(f)
 	box["hp"].max_value = f.max_hp
 	_tween_bar(box["hp"], f.hp)
 

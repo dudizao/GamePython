@@ -59,7 +59,6 @@ const ITEM_VALUE := {
 const BATTLE_MAX_ROUNDS := 4
 ## Fuga: d20 + velocidade >= FLEE_DC.
 const FLEE_DC := 12
-const BATTLE_ACTIONS := ["attack", "defend", "ability", "item", "flee"]
 
 # --- Poções (inventário) -------------------------------------------------------
 const MAX_POTIONS := 3
@@ -121,7 +120,43 @@ const MONSTER_KINDS := {
 	"slime": { "name": "Slime", "hp": 20, "attack": 6, "defense": 2, "xp": 15, "weight": 50 },
 	"lobo": { "name": "Lobo", "hp": 30, "attack": 9, "defense": 3, "xp": 25, "weight": 35 },
 	"ogro": { "name": "Ogro", "hp": 45, "attack": 12, "defense": 5, "xp": 40, "weight": 15 },
+	# Monstros de bioma: só surgem no terreno indicado (polvo: casa ao lado da água) e têm efeito especial.
+	"yeti": { "name": "Yeti", "hp": 40, "attack": 11, "defense": 6, "xp": 35, "weight": 0, "biome": Terrain.GELO, "special": "gelo" },
+	"salamandra": { "name": "Salamandra", "hp": 32, "attack": 11, "defense": 3, "xp": 32, "weight": 0, "biome": Terrain.LAVA, "special": "queimadura" },
+	"esqueleto": { "name": "Esqueleto", "hp": 28, "attack": 10, "defense": 4, "xp": 28, "weight": 0, "biome": Terrain.MASMORRA, "special": "ressurge" },
+	"polvo": { "name": "Polvo", "hp": 35, "attack": 9, "defense": 4, "xp": 30, "weight": 0, "biome": Terrain.AGUA, "special": "prende" },
 }
+## Peso de um monstro de bioma quando a casa sorteada é do bioma dele.
+const BIOME_SPAWN_WEIGHT := 60
+## Efeitos (aplicados se o monstro causou dano e o herói sobreviveu à batalha).
+const FREEZE_MOVE_PENALTY := 3   # Yeti: -3 pontos na próxima rolagem de movimento
+const SNARE_MOVE_CAP := 2        # Polvo: no próximo turno anda no máximo 2 pontos
+const BURN_DAMAGE := 5           # Salamandra: dano no início dos próximos turnos (nunca mata)
+const BURN_TURNS := 2
+const SKELETON_REVIVE_ROUNDS := 2
+const SKELETON_REVIVE_HP_PCT := 50
+
+# --- Terreno vivo ------------------------------------------------------------------
+## Gelo: terminar o movimento em casa de gelo faz deslizar mais uma casa na mesma direção (até o limite).
+const ICE_SLIDE_MAX := 3
+## Lava se espalha para casas vizinhas a cada rodada, até este percentual das casas.
+const LAVA_SPREAD_PER_ROUND := 1
+const LAVA_MAX_PCT := 10
+## Tempestade: a região (5x3) é avisada uma rodada antes; ao cair, fere quem está dentro e,
+## durante aquela rodada, as casas dela custam +1 de movimento.
+const STORM_START_ROUND := 3
+const STORM_DAMAGE := 10
+const STORM_HALF_W := 2
+const STORM_HALF_H := 1
+const STORM_EXTRA_COST := 1
+
+# --- Eventos de rodada -----------------------------------------------------------------
+## A cada ROUND_EVENT_EVERY rodadas acontece um evento, avisado na rodada anterior.
+const ROUND_EVENT_EVERY := 3
+const ROUND_EVENTS := ["chuva_itens", "caravana", "tregua", "erupcao", "nevasca"]
+const EVENT_RAIN_ITEMS := 5
+const EVENT_CARAVAN_MONSTERS := 2
+const EVENT_SNOW_CELLS := 7
 
 # --- Mapa que fecha (estilo Bomberman) ---------------------------------------
 ## A cada CLOSE_EVERY_ROUNDS rodadas, a partir da CLOSE_START_ROUND, o anel mais externo

@@ -2,15 +2,13 @@ class_name EventText
 extends RefCounted
 ## Converte eventos do núcleo em texto (BBCode) para o log e para a janela de batalha.
 
-const ACTION_NAMES := {
-	"attack": "atacar", "defend": "defender", "ability": "habilidade", "item": "usar item", "flee": "fugir",
-}
 const ABILITY_NAMES := {
 	"forca_extra": "Força Extra", "ataque_magico": "Ataque Mágico", "esquiva": "Esquiva", "cura_pessoal": "Cura Pessoal",
 }
 const SOURCE_NAMES := {
 	"battle": "batalha", "terrain": "o terreno", "trap": "uma armadilha", "magic": "magia", "card": "uma carta",
 	"closing": "o mapa fechando", "sudden_death": "a morte súbita", "monster": "um monstro", "player_trap": "uma armadilha armada",
+	"storm": "a tempestade", "burn": "queimadura",
 }
 
 
@@ -33,6 +31,28 @@ static func describe(e: Dictionary, s: GameState) -> String:
 			return "%s foi empurrado pelo mapa que fecha." % nm(s, e["player"])
 		"sudden_death":
 			return "[color=#ff6b6b]MORTE SÚBITA! Todos perdem %d de vida.[/color]" % e["damage"]
+		"storm_warning":
+			return "[color=#c8a0ff]⛈ Tempestade à vista: a região roxa será atingida na próxima rodada.[/color]"
+		"storm_struck":
+			return "[color=#c8a0ff]⛈ A tempestade caiu![/color]"
+		"round_event_announced":
+			return "[color=#8be9fd]◆ Rodada %d: %s (%s).[/color]" % [e["round"], Texts.event_name(e["kind"]), Texts.EVENT_DESCS.get(e["kind"], "")]
+		"round_event":
+			return "[color=#8be9fd][b]◆ %s![/b][/color]" % Texts.event_name(e["kind"])
+		"terrain_changed":
+			var what: String = { Defs.Terrain.LAVA: "lava", Defs.Terrain.GELO: "gelo" }.get(e["to"], "novo terreno")
+			if e["cause"] == "lava_spread":
+				return "[color=#ff9f43]A lava se espalhou.[/color]"
+			return "[color=#8a90a0]%d casas viraram %s.[/color]" % [e["cells"].size(), what]
+		"slid":
+			return "%s escorregou no gelo." % nm(s, e["player"])
+		"status_applied":
+			var msg: String = { "gelo": "congelou", "queimadura": "está queimando", "prende": "está preso" }.get(e["status"], "foi afetado")
+			return "[color=#c8a0ff]%s %s![/color]" % [nm(s, e["player"]), msg]
+		"monster_will_revive":
+			return "[color=#8a90a0]Os ossos se mexem... ele volta na rodada %d.[/color]" % e["round"]
+		"monster_revived":
+			return "[color=#e8dfc0]☠ Um esqueleto ressurgiu![/color]"
 		"turn_started":
 			return "Vez de %s." % nm(s, e["player"])
 		"dice_rolled":
@@ -40,6 +60,10 @@ static func describe(e: Dictionary, s: GameState) -> String:
 			var extra := ""
 			if e.get("pair", false):
 				extra = " [color=#ffd23f](par! +%d)[/color]" % e["bonus"] if e["bonus"] > 0 else " [color=#ff6b6b](olhos de cobra)[/color]"
+			if e.get("status", "") == "gelo":
+				extra += " [color=#8ecdf0](congelado)[/color]"
+			elif e.get("status", "") == "prende":
+				extra += " [color=#c8a0ff](preso)[/color]"
 			return "%s rolou %s%s: %d pontos de movimento." % [nm(s, e["player"]), faces, extra, e["move_points"]]
 		"damage":
 			return "%s perdeu [color=#ff6b6b]%d[/color] de vida (%s)." % [nm(s, e["player"]), e["amount"], SOURCE_NAMES.get(e["source"], e["source"])]

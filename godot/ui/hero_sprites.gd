@@ -31,10 +31,6 @@ static func frame_key(key: String, anim: String, t: float) -> Texture2D:
 	return frames[i]
 
 
-static func has_frames(cls: int) -> bool:
-	return _data.has(Models3D.key_for(cls))
-
-
 func _ready() -> void:
 	if DisplayServer.get_name() == "headless":
 		return

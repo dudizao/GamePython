@@ -126,7 +126,7 @@ func _init(sleeve_color: Color = Color("4ea1ff"), p_class: int = -1) -> void:
 	arm.position = Vector3(0, 0, 2.75)
 	arm.material_override = sleeve
 	add_child(arm)
-	_decorate(sleeve_color)
+	_decorate()
 	set_curl(1.0)
 	set_splay(0.0)
 
@@ -163,7 +163,7 @@ func _ring(radius: float, height: float, z: float, mat: Material, solid := false
 
 
 ## Detalhes de cada classe: braçadeira do guerreiro, estrelas do mago, luva do ladino, ouro do clérigo.
-func _decorate(sleeve_color: Color) -> void:
+func _decorate() -> void:
 	var gold := Toon.make(Color(1.0, 0.8, 0.25), Color(0.62, 0.42, 0.1), 0.02)
 	match _class:
 		Defs.HeroClass.GUERREIRO:

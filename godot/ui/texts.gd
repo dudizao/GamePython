@@ -62,6 +62,44 @@ static func hero_tooltip(h: Hero) -> String:
 		ability_name(h.hero_class), ability_desc(h.hero_class)]
 
 
+const EVENT_NAMES := {
+	"chuva_itens": "Chuva de itens", "caravana": "Caravana de monstros", "tregua": "Trégua",
+	"erupcao": "Erupção", "nevasca": "Nevasca",
+}
+const EVENT_DESCS := {
+	"chuva_itens": "itens caem em vários pontos do mapa",
+	"caravana": "dois monstros extras surgem no mapa",
+	"tregua": "nesta rodada ninguém luta contra heróis nem usa magia",
+	"erupcao": "surge lava no mapa e ela vai se espalhando",
+	"nevasca": "casas de gelo surgem: quem para nelas desliza",
+}
+const SPECIAL_DESCS := {
+	"gelo": "Se ferir você, congela: -%d de movimento na próxima rolagem." % Defs.FREEZE_MOVE_PENALTY,
+	"queimadura": "Se ferir você, queima: %d de dano no início dos próximos %d turnos (não mata)." % [Defs.BURN_DAMAGE, Defs.BURN_TURNS],
+	"ressurge": "Volta uma vez, %d rodadas depois de derrotado, com metade da vida." % Defs.SKELETON_REVIVE_ROUNDS,
+	"prende": "Se ferir você, prende: no próximo turno você anda no máximo %d." % Defs.SNARE_MOVE_CAP,
+}
+
+
+static func event_name(kind: String) -> String:
+	return EVENT_NAMES.get(kind, kind)
+
+
+static func monster_special(m: Monster) -> String:
+	return SPECIAL_DESCS.get(m.special, "")
+
+
+static func status_names(h: Hero) -> Array[String]:
+	var out: Array[String] = []
+	if h.frozen:
+		out.append("Congelado")
+	if h.snared:
+		out.append("Preso")
+	if h.burn_turns > 0:
+		out.append("Queimando %d" % h.burn_turns)
+	return out
+
+
 static func help() -> String:
 	var xp := Defs.XP_THRESHOLDS
 	return """[font_size=26][color=#ffd23f][b]Como jogar[/b][/color][/font_size]
@@ -101,6 +139,13 @@ Se você morrer e ainda houver 2 ou mais heróis vivos, volta como [b]morto-vivo
 [color=#ffd23f][b]O mapa fecha[/b][/color]
 A partir da rodada %d, a cada %d rodadas, o anel mais externo vira bloco (aviso uma rodada antes). Quem estiver nele é empurrado e leva %d de dano. Depois do último anel começa a [b]morte súbita[/b]: todos perdem vida a cada rodada.
 
+[color=#ffd23f][b]Tabuleiro vivo[/b][/color]
+• [b]Tempestade[/b]: a partir da rodada %d uma região de 5x3 é avisada em roxo; na rodada seguinte ela cai, fere quem ficou (%d) e custa +1 de movimento até a próxima.
+• [b]Gelo[/b]: quem termina o movimento em gelo [b]desliza[/b] mais casas na mesma direção (até %d).
+• [b]Lava[/b] se espalha pelas casas vizinhas a cada rodada.
+• [b]Evento de rodada[/b] a cada %d rodadas, avisado antes: chuva de itens, caravana de monstros, trégua, erupção ou nevasca.
+• [b]Monstros de bioma[/b]: Yeti (gelo) congela, Salamandra (lava) queima, Polvo (perto da água) prende e o Esqueleto (masmorra) volta uma vez. Passe o mouse neles para ver o efeito.
+
 [color=#ffd23f][b]Classes[/b][/color]
 %s
 
@@ -112,6 +157,7 @@ R rolar · E parar de andar · C coletar · Q habilidade · 1/2 poções · T ar
 		Defs.ITEM_VALUE[Defs.ItemType.ARMADILHA], Defs.MAX_POTIONS,
 		Defs.MAX_TRAP_KITS, Defs.MAX_ACTIVE_TRAPS, Defs.TRAP_DAMAGE,
 		Defs.CLOSE_START_ROUND, Defs.CLOSE_EVERY_ROUNDS, Defs.CLOSE_DAMAGE,
+		Defs.STORM_START_ROUND, Defs.STORM_DAMAGE, Defs.ICE_SLIDE_MAX, Defs.ROUND_EVENT_EVERY,
 		_classes_help()]
 
 

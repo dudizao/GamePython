@@ -17,10 +17,8 @@ const T_PREP := 0.38        # antecipação: recua e arma o pulso
 const T_SHAKE_END := 0.80   # sacudida
 const T_RELEASE := 0.93     # os dados saem (durante o arremesso)
 const T_THROW := 0.97       # fim do arremesso (chicote do pulso)
-const FLIGHT := 0.64
 const T_FOLLOW_END := 1.30  # passa do ponto e relaxa
 const T_AWAY_END := 1.78    # sai de cena
-const T_HOLD_END := 2.0
 const T_FADE := 0.25
 const FINGER_DELAY := [0.055, 0.037, 0.018, 0.0]  # os dedos abrem em sequência
 

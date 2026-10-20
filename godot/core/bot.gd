@@ -69,7 +69,7 @@ static func _choose_action(state: GameState, hero: Hero) -> Dictionary:
 						return { "type": "ability" }
 			Defs.HeroClass.MAGO:
 				for o in state.alive_heroes():
-					if _hostile(hero, o) and state.in_magic_line(hero.pos, o.pos):
+					if not state.is_truce() and _hostile(hero, o) and state.in_magic_line(hero.pos, o.pos):
 						return { "type": "ability", "target": o.id }
 			Defs.HeroClass.LADINO:
 				if hero.hp < 60:
@@ -138,9 +138,12 @@ static func _cell_score(state: GameState, hero: Hero, pos: Vector2i) -> float:
 
 ## Anel que vai fechar na próxima rodada: sair dele vale mais que quase qualquer coisa.
 static func _danger(state: GameState, pos: Vector2i) -> float:
+	var d := 0.0
 	if state.warning_ring >= 0 and state.board.ring_of(pos) <= state.warning_ring:
-		return -150.0
-	return 0.0
+		d -= 150.0
+	if state.storm_next_cells.has(pos):
+		d -= 40.0  # tempestade avisada: sai da região
+	return d
 
 
 static func _can_beat(hero: Hero, m: Monster) -> bool:

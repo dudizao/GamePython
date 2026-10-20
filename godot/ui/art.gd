@@ -24,8 +24,11 @@ const ITEM := {
 	Defs.ItemType.TESOURO: "ui/trofeu.png",
 	Defs.ItemType.CARTA: "itens/carta.png",
 }
-const MONSTER_COLORS := { "slime": Color("5fd38d"), "lobo": Color("b0b7c3"), "ogro": Color("c0392b") }
-const MONSTER_LETTER := { "slime": "S", "lobo": "L", "ogro": "O" }
+const MONSTER_COLORS := {
+	"slime": Color("5fd38d"), "lobo": Color("b0b7c3"), "ogro": Color("c0392b"),
+	"yeti": Color("8ecdf0"), "salamandra": Color("ff7a3d"), "esqueleto": Color("e8dfc0"), "polvo": Color("b070e0"),
+}
+const MONSTER_LETTER := { "slime": "S", "lobo": "L", "ogro": "O", "yeti": "Y", "salamandra": "M", "esqueleto": "E", "polvo": "P" }
 
 static var _cache := {}
 

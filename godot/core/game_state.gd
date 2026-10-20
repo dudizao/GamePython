@@ -30,6 +30,15 @@ var close_every := Defs.CLOSE_EVERY_ROUNDS
 var sudden_rounds := 0
 var battle: Battle = null
 var traps: Dictionary = {}  # Vector2i -> { owner: id }
+## Terreno vivo e eventos (ver Defs). storm_next é a região avisada; storm_cells, a que caiu nesta rodada.
+var storm_next := Vector2i(-1, -1)
+var storm_next_cells: Array[Vector2i] = []
+var storm_cells: Array[Vector2i] = []
+var pending_event := ""
+var last_event := ""
+var truce_round := -1
+## Esqueletos que ressurgem: { kind, level, pos, due }
+var reviving: Array = []
 var _defer_end := false
 var _xp_queue: Array = []
 var _dead_queue: Array[Hero] = []
@@ -87,6 +96,15 @@ func items_at(p: Vector2i) -> Array:
 	return items.get(p, [])
 
 
+## Custo de entrar na célula: terreno + tempestade ativa.
+func cell_cost(p: Vector2i) -> int:
+	return board.move_cost(p) + (Defs.STORM_EXTRA_COST if storm_cells.has(p) else 0)
+
+
+func is_truce() -> bool:
+	return truce_round == round_number
+
+
 ## Células que o herói consegue alcançar com os pontos de movimento atuais: pos -> custo.
 func reachable(hero: Hero) -> Dictionary:
 	var result := {}
@@ -106,7 +124,7 @@ func reachable(hero: Hero) -> Dictionary:
 				continue
 			if hero.undead and monster_at(n) != null:
 				continue  # monstros ignoram o morto-vivo e bloqueiam o caminho dele
-			var nc: int = dist[cur] + board.move_cost(n)
+			var nc: int = dist[cur] + cell_cost(n)
 			if nc > budget:
 				continue
 			if not dist.has(n) or nc < dist[n]:
@@ -214,9 +232,20 @@ func _do_roll(hero: Hero, events: Array) -> String:
 	var mod := hero.speed_total() - 3
 	if hero.hero_class == Defs.HeroClass.LADINO:
 		mod += 1
-	hero.move_points = maxi(1, base + mod + bonus)
+	var points := base + mod + bonus
+	var status := ""
+	if hero.frozen:
+		points -= Defs.FREEZE_MOVE_PENALTY
+		hero.frozen = false
+		status = "gelo"
+	points = maxi(1, points)
+	if hero.snared:
+		points = mini(points, Defs.SNARE_MOVE_CAP)
+		hero.snared = false
+		status = "prende"
+	hero.move_points = points
 	phase = Defs.Phase.MOVE
-	events.append({ "type": "dice_rolled", "player": hero.id, "roll": base, "dice": dice, "pair": pair, "bonus": bonus, "move_points": hero.move_points })
+	events.append({ "type": "dice_rolled", "player": hero.id, "roll": base, "dice": dice, "pair": pair, "bonus": bonus, "move_points": hero.move_points, "status": status })
 	if reachable(hero).is_empty():
 		phase = Defs.Phase.ACTION
 	return ""
@@ -236,6 +265,7 @@ func _do_move(hero: Hero, action: Dictionary, events: Array) -> String:
 	hero.move_points -= cost
 	hero.pos = to
 	events.append({ "type": "moved", "player": hero.id, "from": from, "to": to, "cost": cost })
+	to = _slide_on_ice(hero, from, to, events)
 
 	var undead_before := hero.undead
 	var terrain_dmg: int = Defs.TERRAIN_DAMAGE.get(board.terrain_at(to), 0)
@@ -254,12 +284,33 @@ func _do_move(hero: Hero, action: Dictionary, events: Array) -> String:
 		for other in _occupants(to, hero):
 			if hero.undead and other.undead:
 				continue  # mortos-vivos não brigam entre si
+			if is_truce():
+				continue  # trégua: ninguém luta contra heróis nesta rodada
 			battle = Battle.start(self, hero, other, null, from, events)
 			phase = Defs.Phase.BATTLE
 			return ""
 	if still_here and hero.move_points <= 0 and not finished:
 		phase = Defs.Phase.ACTION
 	return ""
+
+
+## Gelo: quem termina a jogada numa casa de gelo desliza mais uma casa na direção do movimento,
+## repetindo enquanto continuar no gelo e a casa seguinte estiver livre (até ICE_SLIDE_MAX).
+func _slide_on_ice(hero: Hero, from: Vector2i, to: Vector2i, events: Array) -> Vector2i:
+	var delta := to - from
+	var dir := Vector2i(signi(delta.x), 0) if absi(delta.x) >= absi(delta.y) else Vector2i(0, signi(delta.y))
+	var cur := to
+	for i in Defs.ICE_SLIDE_MAX:
+		if board.terrain_at(cur) != Defs.Terrain.GELO:
+			break
+		var nxt := cur + dir
+		if not board.is_passable(nxt) or monster_at(nxt) != null or _cell_has_hero(nxt):
+			break
+		cur = nxt
+	if cur != to:
+		hero.pos = cur
+		events.append({ "type": "slid", "player": hero.id, "from": to, "to": cur })
+	return cur
 
 
 func _do_end_move(_hero: Hero) -> String:
@@ -377,6 +428,8 @@ func _do_ability(hero: Hero, action: Dictionary, events: Array) -> String:
 			if tid == hero.id or not heroes.has(tid) or not heroes[tid].alive or (hero.undead and heroes[tid].undead):
 				return "invalid_target"
 			var target: Hero = heroes[tid]
+			if is_truce():
+				return "truce"
 			if not in_magic_line(hero.pos, target.pos):
 				return "out_of_range"
 			events.append({ "type": "ability", "player": hero.id, "ability": "ataque_magico", "target": tid })
@@ -508,6 +561,9 @@ func _raise_undead(hero: Hero, events: Array) -> void:
 	hero.cooldown = 0
 	hero.dodge = false
 	hero.power_strike = false
+	hero.frozen = false
+	hero.snared = false
+	hero.burn_turns = 0
 	hero.move_points = 0
 	events.append({ "type": "undead_risen", "player": hero.id, "pos": hero.pos, "hp": hero.hp })
 
@@ -599,22 +655,40 @@ func _refill_monsters() -> void:
 		var spot := _random_monster_cell()
 		if spot == Vector2i(-1, -1):
 			break
-		var m := Monster.create(_next_monster_id, _roll_monster_kind(), _average_level(), spot)
+		var m := Monster.create(_next_monster_id, _roll_monster_kind(spot), _average_level(), spot)
 		_next_monster_id += 1
 		monsters[m.id] = m
 
 
-func _roll_monster_kind() -> String:
+## Sorteia o tipo pelo peso base; monstros de bioma entram com peso extra se a casa combina.
+func _roll_monster_kind(cell: Vector2i = Vector2i(-1, -1)) -> String:
+	var weights := {}
 	var total := 0
 	for k in Defs.MONSTER_KINDS:
-		total += Defs.MONSTER_KINDS[k]["weight"]
+		var w: int = Defs.MONSTER_KINDS[k]["weight"]
+		if cell != Vector2i(-1, -1) and _fits_biome(k, cell):
+			w += Defs.BIOME_SPAWN_WEIGHT
+		weights[k] = w
+		total += w
 	var roll := rng.randi_range(1, total)
 	var acc := 0
-	for k in Defs.MONSTER_KINDS:
-		acc += Defs.MONSTER_KINDS[k]["weight"]
+	for k in weights:
+		acc += weights[k]
 		if roll <= acc:
 			return k
 	return "slime"
+
+
+func _fits_biome(kind: String, cell: Vector2i) -> bool:
+	var biome: int = Defs.MONSTER_KINDS[kind].get("biome", -1)
+	if biome < 0:
+		return false
+	if biome == Defs.Terrain.AGUA:  # polvo: na margem
+		for n in board.neighbors(cell):
+			if board.terrain_at(n) == Defs.Terrain.AGUA:
+				return true
+		return false
+	return board.terrain_at(cell) == biome
 
 
 func _random_monster_cell() -> Vector2i:
@@ -761,6 +835,11 @@ func _advance_turn(events: Array) -> void:
 	next.cooldown = maxi(0, next.cooldown - 1)
 	next.dodge = false
 	next.move_points = 0
+	if next.burn_turns > 0:
+		next.burn_turns -= 1
+		var burn := mini(Defs.BURN_DAMAGE, maxi(0, next.hp - 1))  # queimadura nunca mata
+		next.hp -= burn
+		events.append({ "type": "damage", "player": next.id, "amount": burn, "source": "burn", "hp": next.hp })
 	phase = Defs.Phase.ROLL
 	events.append({ "type": "turn_started", "player": next.id, "turn": turn_number })
 
@@ -784,6 +863,182 @@ func _on_new_round(events: Array) -> void:
 	if _closes_in_round(round_number + 1):
 		warning_ring = rings_closed
 		events.append({ "type": "ring_warning", "ring": warning_ring, "closes_in_round": round_number + 1 })
+	_world_tick(events)
+
+
+# ---------------------------------------------------------------------------
+# Terreno vivo, eventos de rodada e ressurreições (início de cada rodada)
+# ---------------------------------------------------------------------------
+
+func _world_tick(events: Array) -> void:
+	_revive_monsters(events)
+	_spread_lava(events)
+	_storm_tick(events)
+	if finished:
+		return
+	_round_event_tick(events)
+
+
+func _change_terrain(cells: Array[Vector2i], to: int, cause: String, events: Array) -> void:
+	if cells.is_empty():
+		return
+	for c in cells:
+		board.set_terrain(c, to)
+	events.append({ "type": "terrain_changed", "cells": cells, "to": to, "cause": cause })
+
+
+func _count_terrain(t: int) -> int:
+	var n := 0
+	for c in board.main_cells:
+		if board.terrain_at(c) == t:
+			n += 1
+	return n
+
+
+## A lava avança para casas vizinhas sem herói, monstro ou item (nunca passa de LAVA_MAX_PCT).
+func _spread_lava(events: Array) -> void:
+	var lava := _count_terrain(Defs.Terrain.LAVA)
+	if lava == 0 or lava * 100 >= board.main_cells.size() * Defs.LAVA_MAX_PCT:
+		return
+	var options: Array[Vector2i] = []
+	for c in board.main_cells:
+		if board.terrain_at(c) == Defs.Terrain.LAVA or options.has(c):
+			continue
+		if items.has(c) or _cell_has_hero(c) or monster_at(c) != null:
+			continue
+		for n in board.neighbors(c):
+			if board.terrain_at(n) == Defs.Terrain.LAVA:
+				options.append(c)
+				break
+	var picked: Array[Vector2i] = []
+	for i in Defs.LAVA_SPREAD_PER_ROUND:
+		if options.is_empty():
+			break
+		picked.append(options.pop_at(rng.randi_range(0, options.size() - 1)))
+	_change_terrain(picked, Defs.Terrain.LAVA, "lava_spread", events)
+
+
+func storm_area(center: Vector2i) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for dy in range(-Defs.STORM_HALF_H, Defs.STORM_HALF_H + 1):
+		for dx in range(-Defs.STORM_HALF_W, Defs.STORM_HALF_W + 1):
+			var p := center + Vector2i(dx, dy)
+			if board.is_passable(p):
+				out.append(p)
+	return out
+
+
+## A tempestade avisada cai (dano a quem ficou nela, +1 de custo durante a rodada) e a próxima é sorteada.
+func _storm_tick(events: Array) -> void:
+	storm_cells = []
+	if round_number < Defs.STORM_START_ROUND:
+		return
+	if storm_next != Vector2i(-1, -1):
+		storm_cells = storm_next_cells
+		events.append({ "type": "storm_struck", "center": storm_next, "cells": storm_cells })
+		_defer_end = true
+		for h in alive_heroes():
+			if storm_cells.has(h.pos):
+				_damage(h, Defs.STORM_DAMAGE, "storm", events)
+		_defer_end = false
+		_check_end(events)
+		if finished:
+			return
+	# próxima: perto de um herói em jogo, para ameaçar de verdade
+	var pool := alive_heroes()
+	if pool.is_empty():
+		return
+	var anchor: Vector2i = pool[rng.randi_range(0, pool.size() - 1)].pos
+	var center := anchor + Vector2i(rng.randi_range(-Defs.STORM_HALF_W, Defs.STORM_HALF_W), rng.randi_range(-Defs.STORM_HALF_H, Defs.STORM_HALF_H))
+	center = Vector2i(clampi(center.x, 1, board.width - 2), clampi(center.y, 1, board.height - 2))
+	storm_next = center
+	storm_next_cells = storm_area(center)
+	events.append({ "type": "storm_warning", "center": center, "cells": storm_next_cells })
+
+
+## Eventos de rodada: o sorteio é avisado na rodada anterior e acontece no início da seguinte.
+func _round_event_tick(events: Array) -> void:
+	if round_number % Defs.ROUND_EVENT_EVERY == 0 and pending_event != "":
+		var kind := pending_event
+		pending_event = ""
+		last_event = kind
+		_apply_round_event(kind, events)
+	if (round_number + 1) % Defs.ROUND_EVENT_EVERY == 0:
+		var options: Array = Defs.ROUND_EVENTS.filter(func(k): return k != last_event)
+		pending_event = options[rng.randi_range(0, options.size() - 1)]
+		events.append({ "type": "round_event_announced", "kind": pending_event, "round": round_number + 1 })
+
+
+func _apply_round_event(kind: String, events: Array) -> void:
+	var cells: Array[Vector2i] = []
+	match kind:
+		"chuva_itens":
+			for i in Defs.EVENT_RAIN_ITEMS:
+				var spot := _random_item_cell()
+				if spot == Vector2i(-1, -1):
+					break
+				_put_item(spot, _roll_item_type())
+				cells.append(spot)
+		"caravana":
+			for i in Defs.EVENT_CARAVAN_MONSTERS:
+				var spot := _random_monster_cell()
+				if spot == Vector2i(-1, -1):
+					break
+				var m := Monster.create(_next_monster_id, _roll_monster_kind(spot), _average_level(), spot)
+				_next_monster_id += 1
+				monsters[m.id] = m
+				cells.append(spot)
+		"tregua":
+			truce_round = round_number
+		"erupcao":
+			var spots: Array[Vector2i] = []
+			for c in board.main_cells:
+				if board.terrain_at(c) != Defs.Terrain.LAVA and not items.has(c) and not board.is_border(c) and monster_at(c) == null:
+					var far := true
+					for h in alive_heroes():
+						if absi(h.pos.x - c.x) + absi(h.pos.y - c.y) < 3:
+							far = false
+							break
+					if far:
+						spots.append(c)
+			if not spots.is_empty():
+				var center: Vector2i = spots[rng.randi_range(0, spots.size() - 1)]
+				cells.append(center)
+				for n in board.neighbors(center):
+					if cells.size() < 3 and board.is_passable(n) and not items.has(n) and not _cell_has_hero(n) and monster_at(n) == null:
+						cells.append(n)
+				_change_terrain(cells, Defs.Terrain.LAVA, "erupcao", events)
+		"nevasca":
+			var spots: Array[Vector2i] = []
+			for c in board.main_cells:
+				if board.terrain_at(c) in [Defs.Terrain.PLANICIE, Defs.Terrain.FLORESTA, Defs.Terrain.MASMORRA] and not _cell_has_hero(c) and monster_at(c) == null:
+					spots.append(c)
+			for i in Defs.EVENT_SNOW_CELLS:
+				if spots.is_empty():
+					break
+				cells.append(spots.pop_at(rng.randi_range(0, spots.size() - 1)))
+			_change_terrain(cells, Defs.Terrain.GELO, "nevasca", events)
+	events.append({ "type": "round_event", "kind": kind, "cells": cells })
+
+
+## Esqueletos derrotados voltam depois de SKELETON_REVIVE_ROUNDS rodadas, uma única vez.
+func _revive_monsters(events: Array) -> void:
+	var still: Array = []
+	for r in reviving:
+		if round_number < r["due"]:
+			still.append(r)
+			continue
+		var spot: Vector2i = r["pos"]
+		if not board.is_passable(spot) or monster_at(spot) != null or _cell_has_hero(spot):
+			spot = _spawn_cell_near(spot)
+		var m := Monster.create(_next_monster_id, r["kind"], r["level"], spot)
+		_next_monster_id += 1
+		m.revived = true
+		m.xp = m.xp / 2
+		m.hp = maxi(1, m.max_hp * Defs.SKELETON_REVIVE_HP_PCT / 100)
+		monsters[m.id] = m
+		events.append({ "type": "monster_revived", "monster": m.id, "kind": m.kind, "pos": spot })
+	reviving = still
 
 
 func _sudden_death(events: Array) -> void:
